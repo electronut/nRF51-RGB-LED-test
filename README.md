@@ -1,11 +1,10 @@
-![](nrf51-ultrasonic.jpg)
+![](nrf51-rgb-led.jpg)
 
-In this project, we will talk to the popular ultrasonic distance
-sensor HC-SR04 using the Nordic nRF51-DK board, and transmit the
-distance information over BLE using the NUS (Nordic UART Service). We
-will be utilizing *GPIO* and *Timer1* for this purpose.
+In this project, we will control a common cathode RGB LED connected to
+the Nordic nRF51-DK board, from the Nordic nRFToolbox App. It
+demonstrates PWM and NUS (Nordic UART Service).
 
 Read more at:
 
-http://electronut.in/nrf51-hcsr04/
+http://electronut.in/nrf51-rgb-led-test
 
