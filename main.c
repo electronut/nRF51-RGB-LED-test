@@ -2,7 +2,9 @@
    
    nRF51-RGB-LED-test/main.c
 
-   Controlling an RGB LED with nRF51-DK
+   Controlling an RGB LED with nRF51-DK.
+
+   Demonstrates PWM and NUS (Nordic UART Service).
 
    Author: Mahesh Venkitachalam
    Website: electronut.in
@@ -81,6 +83,8 @@ static void gap_params_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+// These are based on default values sent by Nordic nRFToolbox app
+// Modify as neeeded
 #define FORWARD "FastForward"
 #define REWIND "Rewind"
 #define STOP "Stop"
@@ -98,12 +102,11 @@ const uint32_t delayInc = 25;
 
 bool enablePWM = true;
 bool pausePWM = false;
+
 // Function for handling the data from the Nordic UART Service.
 static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, 
                              uint16_t length)
 {
-  //printf("NUS: %s\n", (char*)p_data);
-
   if (strstr((char*)(p_data), FORWARD)) {
     if((delay + delayInc) < delayMax) {
       delay += delayInc;
@@ -129,15 +132,6 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data,
   else if (strstr((char*)(p_data), PAUSE)) {
     pausePWM = !pausePWM;
   }
-
-#if 0
-    for (uint32_t i = 0; i < length; i++)
-    {
-        while(app_uart_put(p_data[i]) != NRF_SUCCESS);
-    }
-    while(app_uart_put('\n') != NRF_SUCCESS);
-#endif
-
 }
 
 // Function for initializing services that will be used by the application.
@@ -342,18 +336,6 @@ static void uart_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
-
-void start_pwm()
-{
-
-}
-
-
-void stop_pwm()
-{
-
-}
-
 // Function for initializing the Advertising functionality.
 static void advertising_init(void)
 {
@@ -412,10 +394,11 @@ int main(void)
     err_code = ble_advertising_start(BLE_ADV_MODE_FAST);
     APP_ERROR_CHECK(err_code);
 
-        // init GPIOTE
+    // init GPIOTE
     err_code = nrf_drv_gpiote_init();
     APP_ERROR_CHECK(err_code);
 
+    // init PPI
     err_code = nrf_drv_ppi_init();
     APP_ERROR_CHECK(err_code);
 
@@ -428,6 +411,8 @@ int main(void)
     // Create the instance "PWM1" using TIMER1.
     APP_PWM_INSTANCE(PWM1,1);                   
 
+    // RGB LED pins
+    // (Common cathode)
     uint32_t pinR = 1;
     uint32_t pinG = 2;
     uint32_t pinB = 3;
@@ -459,11 +444,6 @@ int main(void)
     int val = 0;
 
     // main loop:
-
-    // SW1 is monitored by checking the pin 17 state
-    // SW2 uses a GPIOTE callback
-    // toggling SW1 and SW2 starts/stops PWM on LED1 and LED2
-
     bool pwmEnabled = true;
 
     while(1) {
@@ -477,6 +457,10 @@ int main(void)
             app_pwm_disable(&PWM1);
             app_pwm_disable(&PWM2);
 
+            // This is required becauase app_pwm_disable()
+            // has a bug. 
+            // See: 
+            // https://devzone.nordicsemi.com/question/41179/how-to-stop-pwm-and-set-pin-to-clear/
             nrf_drv_gpiote_out_task_disable(pinR);
             nrf_gpio_cfg_output(pinR);
             nrf_gpio_pin_clear(pinR);
@@ -492,6 +476,9 @@ int main(void)
         }
         else {
           if(!pwmEnabled) {
+
+            // enable PWM 
+
             nrf_drv_gpiote_out_task_enable(pinR);
             nrf_drv_gpiote_out_task_enable(pinG);
             nrf_drv_gpiote_out_task_enable(pinB);
@@ -505,12 +492,10 @@ int main(void)
         if(pwmEnabled) {
           // Set the duty cycle - keep trying until PWM is ready
           while (app_pwm_channel_duty_set(&PWM1, 0, val) == NRF_ERROR_BUSY);
-          
           while (app_pwm_channel_duty_set(&PWM1, 1, val) == NRF_ERROR_BUSY);
-          
-          while (app_pwm_channel_duty_set(&PWM2, 0, val) == NRF_ERROR_BUSY);        
+          while (app_pwm_channel_duty_set(&PWM2, 0, val) == NRF_ERROR_BUSY);
         }
-
+        
         // change direction at edges
         if(val > 99) {
           dir = -1;
