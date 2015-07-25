@@ -63,7 +63,7 @@ static void gap_params_init(void)
 
     BLE_GAP_CONN_SEC_MODE_SET_OPEN(&sec_mode);
     
-    const char deviceName[] = "HC-SR04";
+    const char deviceName[] = "RGB LED";
 
     err_code = sd_ble_gap_device_name_set(&sec_mode,
                                           (const uint8_t *) deviceName,
@@ -81,15 +81,63 @@ static void gap_params_init(void)
     APP_ERROR_CHECK(err_code);
 }
 
+#define FORWARD "FastForward"
+#define REWIND "Rewind"
+#define STOP "Stop"
+#define PAUSE "Pause"
+#define PLAY "Play"
+#define START "Start"
+#define END "End"
+
+// delay in milliseconds between PWM updates
+uint32_t delay = 10;
+// min/max delay,increment in milliseconds
+const uint32_t delayMin = 10;
+const uint32_t delayMax = 250;
+const uint32_t delayInc = 25;
+
+bool enablePWM = true;
+bool pausePWM = false;
 // Function for handling the data from the Nordic UART Service.
 static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, 
                              uint16_t length)
 {
+  //printf("NUS: %s\n", (char*)p_data);
+
+  if (strstr((char*)(p_data), FORWARD)) {
+    if((delay + delayInc) < delayMax) {
+      delay += delayInc;
+    }
+  }
+  else if (strstr((char*)(p_data), REWIND)) {
+    if((delay - delayInc) > delayMin) {
+      delay -= delayInc;
+    }
+  }
+  else if (strstr((char*)(p_data), START)) {
+    delay = delayMin;
+  }
+  else if (strstr((char*)(p_data), END)) {
+    delay = delayMax;
+  }
+  else if (strstr((char*)(p_data), STOP)) {
+    enablePWM = false;
+  }
+  else if (strstr((char*)(p_data), PLAY)) {
+    enablePWM = true;
+  }
+  else if (strstr((char*)(p_data), PAUSE)) {
+    pausePWM = !pausePWM;
+  }
+
+#if 0
     for (uint32_t i = 0; i < length; i++)
     {
         while(app_uart_put(p_data[i]) != NRF_SUCCESS);
     }
     while(app_uart_put('\n') != NRF_SUCCESS);
+#endif
+
 }
 
 // Function for initializing services that will be used by the application.
@@ -295,6 +343,17 @@ static void uart_init(void)
 }
 
 
+void start_pwm()
+{
+
+}
+
+
+void stop_pwm()
+{
+
+}
+
 // Function for initializing the Advertising functionality.
 static void advertising_init(void)
 {
@@ -335,21 +394,6 @@ void pwm_ready_callback(uint32_t pwm_id)
     ready_flag = true;
 }
 
-
-// SW2 state
-bool stateSW2 = true;
-
-void pin_event_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
-{
-  printf("%d: %d\n", (int)pin, (int)action);
-
-  if (pin == 18) {
-    stateSW2 = !stateSW2; 
-  }
-}
-
-
-
 // Application main function.
 int main(void)
 {
@@ -383,13 +427,14 @@ int main(void)
 
     // Create the instance "PWM1" using TIMER1.
     APP_PWM_INSTANCE(PWM1,1);                   
- 
-    /* 2-channel PWM, 200Hz, output on DK LED pins. */
-    app_pwm_config_t pwm1_cfg = 
-      APP_PWM_DEFAULT_CONFIG_2CH(5000L, 1, 2);
 
-    // reverse polarity of second pin
-    pwm1_cfg.pin_polarity[1] = APP_PWM_POLARITY_ACTIVE_LOW;
+    uint32_t pinR = 1;
+    uint32_t pinG = 2;
+    uint32_t pinB = 3;
+   
+    // 2-channel PWM, 200Hz
+    app_pwm_config_t pwm1_cfg = 
+      APP_PWM_DEFAULT_CONFIG_2CH(5000L, pinR, pinG);
 
     /* Initialize and enable PWM. */
     err_code = app_pwm_init(&PWM1,&pwm1_cfg,pwm_ready_callback);
@@ -399,12 +444,9 @@ int main(void)
     // Create the instance "PWM2" using TIMER2.
     APP_PWM_INSTANCE(PWM2,2);                   
  
-    /* 2-channel PWM, 200Hz, output on DK LED pins. */
+    // 1-channel PWM, 200Hz
     app_pwm_config_t pwm2_cfg = 
-      APP_PWM_DEFAULT_CONFIG_1CH(5000L, 3);
-
-    // reverse polarity of first pin
-    pwm2_cfg.pin_polarity[0] = APP_PWM_POLARITY_ACTIVE_LOW;
+      APP_PWM_DEFAULT_CONFIG_1CH(5000L, pinB);
 
     /* Initialize and enable PWM. */
     err_code = app_pwm_init(&PWM2,&pwm2_cfg,pwm_ready_callback);
@@ -412,27 +454,9 @@ int main(void)
     app_pwm_enable(&PWM2);
 
 
-    // set up P0.17 (SW1):
-    nrf_gpio_cfg_input(17, NRF_GPIO_PIN_PULLUP);
-    //nrf_gpio_cfg_input(18, NRF_GPIO_PIN_PULLUP);
-
-    // set up P0.18 (SW2):
-    nrf_drv_gpiote_in_config_t config = GPIOTE_CONFIG_IN_SENSE_HITOLO(false);
-    config.pull = NRF_GPIO_PIN_PULLUP;
-    err_code = nrf_drv_gpiote_in_init(18, &config, pin_event_handler);
-    APP_ERROR_CHECK(err_code);
-
-    nrf_drv_gpiote_in_event_enable(18, true);
-
     // Enter main loop.
     int dir = 1;
     int val = 0;
-
-    int prevState = 0;
-    int currState = 0;
-
-    // SW1 button state
-    bool stateSW1 = true;
 
     // main loop:
 
@@ -440,42 +464,64 @@ int main(void)
     // SW2 uses a GPIOTE callback
     // toggling SW1 and SW2 starts/stops PWM on LED1 and LED2
 
+    bool pwmEnabled = true;
+
     while(1) {
 
-      // get state of P0.17 (SW1)
-      currState = nrf_gpio_pin_read(17);
-      // high to low transition
-      if(prevState == 1 && currState == 0) {
-        stateSW1 = !stateSW1; 
+      // only if not paused 
+      if (!pausePWM) {
+        
+        // enable disable as needed
+        if(!enablePWM) {
+          if(pwmEnabled) {
+            app_pwm_disable(&PWM1);
+            app_pwm_disable(&PWM2);
+
+            nrf_drv_gpiote_out_task_disable(pinR);
+            nrf_gpio_cfg_output(pinR);
+            nrf_gpio_pin_clear(pinR);
+            nrf_drv_gpiote_out_task_disable(pinG);
+            nrf_gpio_cfg_output(pinG);
+            nrf_gpio_pin_clear(pinG);
+            nrf_drv_gpiote_out_task_disable(pinB);
+            nrf_gpio_cfg_output(pinB);
+            nrf_gpio_pin_clear(pinB);
+
+            pwmEnabled = false;
+          }
+        }
+        else {
+          if(!pwmEnabled) {
+            nrf_drv_gpiote_out_task_enable(pinR);
+            nrf_drv_gpiote_out_task_enable(pinG);
+            nrf_drv_gpiote_out_task_enable(pinB);
+
+            app_pwm_enable(&PWM1);
+            app_pwm_enable(&PWM2);
+            pwmEnabled = true;
+          }
+        }
+
+        if(pwmEnabled) {
+          // Set the duty cycle - keep trying until PWM is ready
+          while (app_pwm_channel_duty_set(&PWM1, 0, val) == NRF_ERROR_BUSY);
+          
+          while (app_pwm_channel_duty_set(&PWM1, 1, val) == NRF_ERROR_BUSY);
+          
+          while (app_pwm_channel_duty_set(&PWM2, 0, val) == NRF_ERROR_BUSY);        
+        }
+
+        // change direction at edges
+        if(val > 99) {
+          dir = -1;
+        }
+        else if (val < 1){
+          dir = 1;
+        }
+        // increment/decrement
+        val += dir*5;
       }      
-      // cache state
-      prevState = currState;
-
-      // Set the duty cycle - keep trying until PWM is ready
-
-      if(stateSW1) {
-        while (app_pwm_channel_duty_set(&PWM1, 0, val) == NRF_ERROR_BUSY);
-      }
-
-      if (stateSW2) {
-        while (app_pwm_channel_duty_set(&PWM1, 1, val) == NRF_ERROR_BUSY);
-      }
-
-      while (app_pwm_channel_duty_set(&PWM2, 0, val) == NRF_ERROR_BUSY);
-      
-      
-      // change direction at edges
-      if(val > 99) {
-        dir = -1;
-      }
-      else if (val < 1){
-        dir = 1;
-      }
-      // increment/decrement
-      val += dir*5;
-
       // delay
-      nrf_delay_ms(50);
-
+      nrf_delay_ms(delay);
     }
 }

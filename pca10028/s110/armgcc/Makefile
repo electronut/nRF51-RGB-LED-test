@@ -42,7 +42,6 @@ remduplicates = $(strip $(if $1,$(firstword $1) $(call remduplicates,$(filter-ou
 #source common to all targets
 C_SOURCE_FILES += \
 $(abspath ../../../main.c) \
-$(abspath ../../../neopixel.c) \
 $(SDK_ROOT)/components/libraries/util/app_error.c \
 $(SDK_ROOT)/components/libraries/fifo/app_fifo.c \
 $(SDK_ROOT)/components/libraries/trace/app_trace.c \
